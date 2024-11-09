@@ -1,1 +1,2180 @@
 
+import { HttpClient } from '@angular/common/http';
+import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { QMSESignatureComponent } from 'src/app/rqp-qms-module/qms-common/e-signature/qms-e-signature.component';
+import { MessageDialogComponent } from '../message-dialog/message-dialog.component';
+import { MatDialog } from '@angular/material/dialog';
+import { ApiService } from 'src/app/service/api-service/api.service';
+import { apiEndPoints } from 'src/app/service/api-service/api-endpoints.constant';
+import { timer, takeUntil, Subject } from 'rxjs';
+import { MessageService } from 'src/app/service/message.service';
+import { Router } from '@angular/router';
+import { FormBuilder, FormControl, FormGroup } from '@angular/forms';
+import { LovDialogComponent } from '../lov-dialog/lov-dialog.component';
+import { ToolbarService } from 'src/app/service/toolbar.service';
+
+@Component({
+  selector: 'app-common-button-bar',
+  templateUrl: './common-button-bar.component.html',
+  styleUrls: ['./common-button-bar.component.scss']
+})
+export class CommonButtonBarComponent {
+  @Input() buttonConfig: { label: string, getPayload: () => any }[]; // Array of buttons with label, API URL, and payload
+  @Output() buttonClicked = new EventEmitter<{ buttonName: string, success: boolean }>(); // Emit button name and success status
+
+  constructor(private http: HttpClient,public dialog: MatDialog,
+    private apiService:ApiService, private messageService:MessageService,private router: Router,private toolbarService:ToolbarService,
+    private fb: FormBuilder
+  ) {
+    this.FooterForm = this.fb.group({
+      nextStage: [''],
+      previousStage: [''],
+    });
+  }
+
+  ngOnInit(): void {
+    console.log(this.buttonConfig)
+  }
+  public FooterForm: FormGroup;
+  public commentForm: FormGroup = new FormGroup({
+    comments: new FormControl(''),
+    // nextStage: new FormControl(''),
+  });
+  private $destroy = new Subject();
+  selectedDialogData:any;
+  pageData:any;
+  commentsFieldData:any;
+  buttonName:any;
+  payload:any;
+  handleButtonClick(button: { label: string,  getPayload: () => any }) {
+    console.log(button.label)
+
+    const payload = button.getPayload();
+    this.payload = payload;
+    this.headerData = payload.calculatedValue;
+    this.pageData = payload.pageData;
+    this.commentsFieldData = payload.commentsFieldData;
+    this.buttonName = button.label;
+    console.log(payload)
+    if(button.label == 'Comments'){
+      const payload = button.getPayload();
+      let lcRequestnumber = payload.lcRequestnumber;
+      let lcnum = payload.lcnum;
+      let templateName = payload.templateName;
+      let stage = payload.stage;
+      let userid = payload.userid;
+      let moduleCode = payload.moduleCode;
+
+      let HttpMethod = 'POST';
+      let params ={lcRequestnumber,lcnum,templateName,stage,userid,moduleCode};
+      let APIURL:any = 'gmapr/gmap-comment/get-all';
+      this.apiService.sendRequest(APIURL, HttpMethod, params).subscribe((data: any) => {
+        console.log(data);
+        let fileExtension = 'pdf';
+        const binaryData = atob(data.data);
+        const arrayBuffer = new ArrayBuffer(binaryData.length);
+        const uint8Array = new Uint8Array(arrayBuffer);
+        for (let i = 0; i < binaryData.length; i++) {
+          uint8Array[i] = binaryData.charCodeAt(i);
+        }
+        let blob: any;
+        blob = new Blob([uint8Array], { type: 'application/pdf' });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = lcRequestnumber + '.' + fileExtension;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+    
+      });
+    }
+    else{
+      if (
+        payload.commentsFieldData == '' ||
+        payload.commentsFieldData == null ||
+        payload.commentsFieldData == undefined
+      ) {
+        this.dialog.open(MessageDialogComponent, {
+          data: { message: 'please add comments', heading: 'Error Information' },
+        });
+        return;
+      }
+      const dialogRef = this.dialog.open(QMSESignatureComponent, {
+        height: '300px',
+        width: '600px',
+        data: {},
+        disableClose: true,
+      });
+      dialogRef.afterClosed().subscribe((result) => {
+        if (result) {
+          this.selectedDialogData = result.data;
+          if (this.selectedDialogData) {
+            this.onCallSubmitApi();
+          }
+        }
+      });
+    }
+    // this.http.post(button.apiUrl, button.payload).subscribe(
+    //   (response) => {
+    //     this.buttonClicked.emit({ buttonName: button.label, success: true }); // Emit success
+    //   },
+    //   (error) => {
+    //     this.buttonClicked.emit({ buttonName: button.label, success: false }); // Emit failure
+    //   }
+    // );
+  }
+  headerData:any;
+  onCallSubmitApi() {
+  //  this.headerData = this.payload=
+    console.log(this.headerData);
+    let body = {
+      unitCode: this.headerData.unitcode,
+      moduleCode: this.headerData.modulecode,
+      departmentCode: this.headerData.departmentcode,
+      lcrqNumber: this.pageData.requestNo,
+      lcNumber: this.headerData.lcnum,
+      lcStage: this.headerData.stage,
+      lcRole: this.headerData.role,
+      stage2: this.commentForm.controls['nextStage']?.value,
+      createdBy: this.headerData.createdby,
+      comments: this.commentsFieldData,
+      documentModule: 'string',
+      documentStatus: 'string',
+      // draft: true
+    };
+    if (body.stage2 == '' || body.stage2 == undefined) {
+      body.stage2 = 0;
+    }
+    let HttpMethod = 'POST';
+    let params ={};
+    let APIURL:any;
+
+    if(this.buttonName == 'Submit'){
+    APIURL = apiEndPoints.commonButtonBarApprove;
+    }else if(this.buttonName == 'Return'){
+    APIURL = apiEndPoints.commonButtonBarReject;
+    }else if(this.buttonName == 'Cancel'){
+      this.buttonClicked.emit({ buttonName: this.buttonName, success: true })
+    }
+    this.apiService.sendRequest(APIURL, HttpMethod, params,body).subscribe((data: any) => {
+      if (data.errorInfo != null) {
+        this.buttonClicked.emit({ buttonName: this.buttonName, success: false })
+        this.dialog.open(MessageDialogComponent, {
+          data: {
+            message: data.errorInfo.message,
+            heading: 'Error Information',
+          },
+        });
+      } else {
+        this.buttonClicked.emit({ buttonName: this.buttonName, success: true })
+        this.messageService.sendSnackbar(
+          'success',
+          'Record inserted successfully'
+        );
+
+        timer(2000)
+          .pipe(takeUntil(this.$destroy))
+          .subscribe(() => {
+            this.router.navigateByUrl('/excel/rasi-home');
+          });
+      }
+     // this.isLoading = false;
+    });
+  }
+  openNextStageLov() {
+    this.displayedColumns = [
+      { field: 'stage', title: 'Code' },
+      { field: 'lcRole', title: 'Description' },
+    ];
+
+    const dialogRef = this.dialog.open(LovDialogComponent, {
+      height: '500px',
+      width: '600px',
+      data: {
+        dialogTitle: 'Stage',
+        dialogColumns: this.displayedColumns,
+        dialogData: this.toolbarService.nextStageListData,
+        lovName: 'businessUnitList',
+      },
+      disableClose: true,
+    });
+    dialogRef.afterClosed().subscribe((result) => {
+      if (result) {
+        this.selectedDialogData = result.data;
+        console.log(this.selectedDialogData);
+        this.FooterForm.controls['nextStage'].setValue(result.data.stage);
+      }
+    });
+  }
+  displayedColumns:any;
+  openPreviousStageLov() {
+    this.displayedColumns = [
+      { field: 'stage', title: 'Code' },
+      { field: 'lcRole', title: 'Description' },
+    ];
+    const dialogRef = this.dialog.open(LovDialogComponent, {
+      height: '500px',
+      width: '600px',
+      data: {
+        dialogTitle: 'Previous Stage',
+        dialogColumns: this.displayedColumns,
+        dialogData: this.toolbarService.previousStageListData,
+        lovName: 'businessUnitList',
+      },
+      disableClose: true,
+    });
+    dialogRef.afterClosed().subscribe((result) => {
+      if (result) {
+        this.selectedDialogData = result.data;
+        this.FooterForm.controls['previousStage'].setValue(result.data.stage);
+      }
+    });
+  }
+}
+====================================================================================================
+User name Saanso.IT@Outlook.com  / November@2024
+=============================================================================================================
+Select your source:
+Provide a name for pipeline: 
+GCS project name: 
+
+GCS bucket name:
+
+Input Cloud Storage File(s):
+
+GCS credentials:
+
+Run Every
+
+Create
+
+Cancel
+
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f9;
+    margin: 0;
+    padding: 20px;
+}
+
+.form-container {
+    width: 50%;
+    margin: 0 auto;
+    padding: 20px;
+    border: 2px solid #333;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+h2 {
+    text-align: center;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+label {
+    display: block;
+    font-size: 1.1em;
+    margin-bottom: 5px;
+}
+
+input {
+    padding: 10px;
+    font-size: 1em;
+    width: 100%;
+    margin-bottom: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+.error-message {
+    color: red;
+    font-size: 0.9em;
+}
+
+.button-group {
+    text-align: center;
+}
+
+button {
+    padding: 10px 20px;
+    font-size: 1.1em;
+    cursor: pointer;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    margin: 5px;
+}
+
+button:hover {
+    background-color: #45a049;
+}
+
+button[type="button"] {
+    background-color: #f44336;
+}
+
+button[type="button"]:hover {
+    background-color: #e53935;
+}
+==================================
+/* Basic reset */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f9;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.form-container {
+    width: 50%;
+    max-width: 600px; /* Limit the maximum width */
+    margin: 20px; /* Margin to avoid screen edges */
+    padding: 30px; /* Padding inside the form */
+    border: 1px solid #ccc; /* Light border for definition */
+    border-radius: 8px; /* Rounded corners */
+    background-color: #fff; /* White background for the form */
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); /* Subtle shadow for depth */
+}
+
+h2 {
+    text-align: center; /* Centered heading */
+    margin-bottom: 20px; /* Space below the heading */
+    color: #333; /* Darker color for better visibility */
+}
+
+.form-row {
+    display: flex; /* Flexbox for alignment */
+    align-items: center; /* Center items vertically */
+    margin-bottom: 20px; /* Space between rows */
+}
+
+.full-width {
+    flex: 1; /* Allow the form fields to grow */
+    margin-right: 16px; /* Space between field and value box */
+}
+
+.value {
+    font-weight: bold; /* Bold text for emphasis */
+    margin-left: 16px; /* Space between field and value */
+    padding: 10px; /* Padding inside the value box */
+    border: 1px solid #ccc; /* Light border around the value box */
+    border-radius: 4px; /* Rounded corners */
+    background-color: #e8f0fe; /* Light blue background for value box */
+    flex-basis: 150px; /* Fixed width for value box */
+    text-align: center; /* Center text in the value box */
+}
+
+mat-form-field {
+    width: 100%; /* Ensure form fields take the full width */
+}
+
+.button-group {
+    text-align: center; /* Center buttons */
+    margin-top: 20px; /* Space above buttons */
+}
+
+button {
+    margin: 5px; /* Space between buttons */
+    min-width: 100px; /* Minimum width for buttons */
+    padding: 10px; /* Padding inside buttons */
+    font-size: 16px; /* Slightly larger text */
+    border-radius: 4px; /* Rounded corners for buttons */
+}
+
+.md-primary {
+    background-color: #3f51b5; /* Primary button color */
+    color: white; /* White text on primary button */
+    transition: background-color 0.3s; /* Smooth transition */
+}
+
+.md-primary:hover {
+    background-color: #303f9f; /* Darker shade on hover */
+}
+
+.md-warn {
+    background-color: #f44336; /* Warn button color */
+    color: white; /* White text on warn button */
+    transition: background-color 0.3s; /* Smooth transition */
+}
+
+.md-warn:hover {
+    background-color: #c62828; /* Darker shade on hover */
+}
+==============================================================================================================
+===>uninstall
+npm uninstall -g @angular/cli
+==>then clear cache
+npm cache clean --force
+==>then install
+npm install @angular/cli@15
+===>for globally
+npm install -g @angular/cli@15
+
+ReactJs
+============PS D:\ANGULAR 15\Angular 17\crew-management> cd Mounika
+PS D:\ANGULAR 15\Angular 17\crew-management\Mounika> npm create vite@latest
+Need to install the following packages:
+  create-vite@5.5.2
+Ok to proceed? (y) y
+√ Project name: ... SubMounika
+√ Package name: ... submounika
+? Select a framework: » - Use arrow-keys. Return to submit.
+? Select a framework: » - Use arrow-keys. Return to submit.
+? Select a framework: » - Use arrow-keys. Return to submit.
+√ Select a framework: » React
+√ Select a variant: » JavaScript
+
+Scaffolding project in D:\ANGULAR 15\Angular 17\crew-management\Mounika\SubMounika...
+
+Done. Now run:
+
+  cd SubMounika
+  npm install
+  npm run dev
+
+npm notice 
+npm notice New major version of npm available! 9.5.0 -> 10.8.3
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v10.8.3
+npm notice Run npm install -g npm@10.8.3 to update!
+npm notice
+PS D:\ANGULAR 15\Angular 17\crew-management\Mounika> cd SubMounika
+PS D:\ANGULAR 15\Angular 17\crew-management\Mounika\SubMounika> npm install
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/js@9.11.1',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.15.0', npm: '9.5.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'eslint@9.11.1',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.15.0', npm: '9.5.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/config-array@0.18.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.15.0', npm: '9.5.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/core@0.6.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.15.0', npm: '9.5.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/eslintrc@3.1.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.15.0', npm: '9.5.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/plugin-kit@0.2.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.15.0', npm: '9.5.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@humanwhocodes/retry@0.3.0',
+npm WARN EBADENGINE   required: { node: '>=18.18' },
+npm WARN EBADENGINE   current: { node: 'v18.15.0', npm: '9.5.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'eslint-scope@8.1.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.15.0', npm: '9.5.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'eslint-visitor-keys@4.1.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.15.0', npm: '9.5.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: 'espree@10.2.0',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.15.0', npm: '9.5.0' }
+npm WARN EBADENGINE }
+npm WARN EBADENGINE Unsupported engine {
+npm WARN EBADENGINE   package: '@eslint/object-schema@2.1.4',
+npm WARN EBADENGINE   required: { node: '^18.18.0 || ^20.9.0 || >=21.1.0' },
+npm WARN EBADENGINE   current: { node: 'v18.15.0', npm: '9.5.0' }
+npm WARN EBADENGINE }
+
+added 266 packages, and audited 267 packages in 15s
+
+102 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+PS D:\ANGULAR 15\Angular 17\crew-management\Mounika\SubMounika> npm run dev
+
+> submounika@0.0.0 dev
+> vite
+
+
+  VITE v5.4.8  ready in 398 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+  ➜  press h + enter to show help
+==========================================================================================================
+<div class="row no-gutters">
+  <div class="col-8 d-flex justify-content-start">
+    <h1 class="customeHeading padding-left_10">Organization Unit</h1>
+  </div>
+  <div class="col-4 d-flex justify-content-end">
+    <button mat-icon-button (click)="onDownloadPDF()">
+      <mat-icon class="close-icon" color="primary">download</mat-icon>
+    </button>
+    <button mat-icon-button [mat-dialog-close]="true">
+      <mat-icon class="close-icon" color="warn">close</mat-icon>
+    </button>
+  </div>
+  <!-- <div class="col-2 d-flex justify-content-end">
+          
+      </div> -->
+</div>
+<mat-spinner
+  *ngIf="isLoading"
+  class="global-loading-spinner"
+  color="primary"
+  mode="indeterminate"
+></mat-spinner>
+<div
+  class="table-box"
+  id="htmlData"
+  *ngIf="this.data"
+  class="tabOverFlowY paddding_25 bg_edf0f8"
+>
+  <div class="margin-top_10">
+    <div class="sup-head1 margin-top_10" id="header">
+      <div class="logo2">
+        <span class="float-left font-size_18 font-family_auto">
+          <h2 class="font-weight_800 color_blue">Organization Unit</h2>
+        </span>
+        <span class="float-right">
+          <img src="../../../assets/logo1.png" />
+        </span>
+      </div>
+    </div>
+    <!-- <div class="headers">Business Unit Information</div> -->
+    <div *ngFor="let data of this.data" [attr.id]="'Location' + data.version">
+      <div>
+        <div class="headers margin_4">
+          <p class="color_aliceblue font-size_12 margin-top_2">
+            Organization Unit - {{ data.version }}
+          </p>
+        </div>
+        <div class="supplier-content">
+          <div class="sup-head">
+            <div class="sup-fields">Version</div>
+            <div class="sup-values">{{ data.version }}</div>
+          </div>
+          <div class="sup-head">
+            <div class="sup-fields">Status</div>
+            <div class="sup-values">{{ onChangeStatus(data.status) }}</div>
+          </div>
+          <div class="sup-head bg-color_bcceea">
+            <div class="sup-fields">Organization Unit Code</div>
+            <div class="sup-values">{{ data.uc0001 }}</div>
+          </div>
+
+          <div class="sup-head bg-color_bcceea">
+            <div class="sup-fields">Organization Unit Name</div>
+            <div class="sup-values">{{ data.ff0003 }}</div>
+          </div>
+          <div class="sup-head">
+            <div class="sup-fields">Organization Code</div>
+            <div class="sup-values">{{ data.ff0002 }}</div>
+          </div>
+
+          <div class="sup-head">
+            <div class="sup-fields">Organization Name</div>
+            <div class="sup-values">{{ data.ff0001 }}</div>
+          </div>
+          <div class="sup-head bg-color_bcceea">
+            <div class="sup-fields">Street-1</div>
+            <div class="sup-values">{{ data.ff0004 }}</div>
+          </div>
+
+          <div class="sup-head bg-color_bcceea">
+            <div class="sup-fields">Street-2</div>
+            <div class="sup-values">{{ data.ff0005 }}</div>
+          </div>
+          <div class="sup-head">
+            <div class="sup-fields">City</div>
+            <div class="sup-values">{{ data.ff0006 }}</div>
+          </div>
+
+          <div class="sup-head">
+            <div class="sup-fields">State</div>
+            <div class="sup-values">{{ data.ff0007 }}</div>
+          </div>
+          <div class="sup-head bg-color_bcceea">
+            <div class="sup-fields">Pincode</div>
+            <div class="sup-values">{{ data.ff0008 }}</div>
+          </div>
+
+          <div class="sup-head bg-color_bcceea">
+            <div class="sup-fields">Mobile No.</div>
+            <div class="sup-values">{{ data.ff0009 }}</div>
+          </div>
+          <div class="sup-head">
+            <div class="sup-fields">Email Id</div>
+            <div class="sup-values">{{ data.ff0010 }}</div>
+          </div>
+
+          <div class="sup-head">
+            <div class="sup-fields">PAN No.</div>
+            <div class="sup-values">{{ data.ff0011 }}</div>
+          </div>
+          <div class="sup-head bg-color_bcceea">
+            <div class="sup-fields">GST No.</div>
+            <div class="sup-values">{{ data.ff0012 }}</div>
+          </div>
+
+          <div class="sup-head bg-color_bcceea">
+            <div class="sup-fields">State Code</div>
+            <div class="sup-values">{{ data.ff0013 }}</div>
+          </div>
+          <div class="sup-head">
+            <div class="sup-fields">Account No.</div>
+            <div class="sup-values">{{ data.ff0014 }}</div>
+          </div>
+
+          <div class="sup-head">
+            <div class="sup-fields">IFSC Code</div>
+            <div class="sup-values">{{ data.ff0015 }}</div>
+          </div>
+          <div class="sup-head bg-color_bcceea">
+            <div class="sup-fields">DL No.</div>
+            <div class="sup-values">{{ data.ff0016 }}</div>
+          </div>
+
+          <div class="sup-head bg-color_bcceea">
+            <div class="sup-fields">Category</div>
+            <div class="sup-values">{{ data.uc0002 }}</div>
+          </div>
+          <div class="sup-head">
+            <div class="sup-fields">Createdon</div>
+            <div class="sup-values">{{ data.createdon }}</div>
+          </div>
+
+          <div class="sup-head">
+            <div class="sup-fields">Createdby</div>
+            <div class="sup-values">{{ data.createdby }}</div>
+          </div>
+        </div>
+        <div class="supplier-content-comments">
+          <div class="sup-head-comments bg-color_bcceea">
+            <div class="sup-fields-comments">Comments :-</div>
+            <div class="sup-values-comments">{{ data.comments }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+=================================================================================
+import {
+  Component,
+  ElementRef,
+  Inject,
+  OnInit,
+  ViewChild,
+} from '@angular/core';
+import { AdminService } from 'src/app/rqp-admin-module/admin-data/admin.service';
+import { VendorListService } from '../vendor-list.service';
+import { MessageService } from 'src/app/service/message.service';
+import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
+import {
+  openPDFByFive,
+  openPDFByFour,
+  openPDFByThree,
+  openPDFByTwo,
+} from 'rqp-audit-trail';
+import { downloadCanvasArea } from 'bk-export';
+import { changeStatusByCode } from 'src/app/common/removeEmptyStrings';
+
+export interface userData {
+  userData: any;
+  type: any;
+  tableData: any;
+}
+@Component({
+  selector: 'app-all-vendor-list-audit-trail',
+  templateUrl: './all-vendor-list-audit-trail.component.html',
+  styleUrls: ['./all-vendor-list-audit-trail.component.scss'],
+})
+export class AllVendorListAuditTrailComponent implements OnInit {
+  @ViewChild('htmlData') htmlData!: ElementRef;
+
+  constructor(
+    public adminService: AdminService,
+    private vendorListService: VendorListService,
+    public messageService: MessageService,
+    public dialogRef: MatDialogRef<AllVendorListAuditTrailComponent>,
+    @Inject(MAT_DIALOG_DATA) public userData: userData
+  ) {}
+
+  data: any;
+  isLoading = false;
+  ngOnInit() {
+    //this.data=this.userData.userData
+    console.log(this.userData.tableData.uc0001);
+    console.log(this.userData.type);
+    //this.setFormValue();
+    this.onSearch();
+  }
+  dataLength: any;
+  onSearch() {
+    this.isLoading = true;
+    this.vendorListService
+      .onActiveAuditTrail(
+        this.userData.tableData.uc0001,
+        this.userData.tableData.uc0002
+      )
+      .subscribe((data: any) => {
+        console.log(data);
+        this.data = data.data;
+        this.dataLength = data.data.length;
+        this.isLoading = false;
+        //this.setFormValue();
+      });
+  }
+
+  fileWidth: any;
+  fileHeight: any;
+  fileWidth1: any;
+  fileHeight1: any;
+  FileURLObject = {
+    url1: '',
+    url2: '',
+    url3: '',
+    url4: '',
+  };
+  onDownloadPDF() {
+    this.messageService.sendSnackbar(
+      'success',
+      'File will get downloaded once its ready'
+    );
+    if (this.dataLength == 1) {
+      this.openPDFByOne();
+    } else if (this.dataLength == 2) {
+      // this.openPDFByTwo();
+      let DATA: any = document.getElementById('Location1');
+      let DATA1: any = document.getElementById('Location2');
+      let HEADER: any = document.getElementById('header');
+      openPDFByTwo(HEADER, DATA, DATA1, 50, 22, 'business-unit');
+    } else if (this.dataLength == 3) {
+      let DATA: any = document.getElementById('Location1');
+      let DATA1: any = document.getElementById('Location2');
+      let DATA2: any = document.getElementById('Location3');
+      let HEADER: any = document.getElementById('header');
+      openPDFByThree(HEADER, DATA, DATA1, DATA2, 50, 22, 'business-unit');
+    } else if (this.dataLength == 4) {
+      let DATA: any = document.getElementById('Location1');
+      let DATA1: any = document.getElementById('Location2');
+      let DATA2: any = document.getElementById('Location3');
+      let DATA3: any = document.getElementById('Location4');
+      let HEADER: any = document.getElementById('header');
+      openPDFByFour(HEADER, DATA, DATA1, DATA2, DATA3, 50, 22, 'business-unit');
+    } else {
+      let DATA: any = document.getElementById('Location1');
+      let DATA1: any = document.getElementById('Location2');
+      let DATA2: any = document.getElementById('Location3');
+      let DATA3: any = document.getElementById('Location4');
+      let DATA4: any = document.getElementById('Location5');
+      let HEADER: any = document.getElementById('header');
+      openPDFByFive(
+        HEADER,
+        DATA,
+        DATA1,
+        DATA2,
+        DATA3,
+        DATA4,
+        50,
+        22,
+        'business-unit'
+      );
+    }
+  }
+  public openPDFByOne(): void {
+    let DATA: any = document.getElementById('htmlData');
+    console.log(DATA);
+    downloadCanvasArea(DATA, 'roleAuditTrail');
+  }
+
+  DATA: any;
+  DOWNLOADLINK: any;
+  onChangeStatus(data: any) {
+    return changeStatusByCode(data);
+  }
+}
+
+===================================================================================
+  onAllSelectAuditTrailRow() {
+    if (this.selectedAllID.length == 0) {
+      this.dialog.open(MessageDialogComponent, {
+        data: {
+          message: 'Please select any row',
+          heading: 'Error Information',
+        },
+      });
+    } else {
+      const dialogRef = this.dialog.open(AllVendorListAuditTrailComponent, {  ==========>>>>home.ts
+        minWidth: '80%',
+        data: { tableData: this.selectedAllID, type: 'Update' },
+      });
+      dialogRef.afterClosed().subscribe((result) => {});
+    }
+  }
+===============================================
+ <button
+              mat-raised-button
+              class="submitButton"
+              (click)="onAllSelectAuditTrailRow()" ===========>home.html
+            >
+              Audit Trail
+            </button>
+
+=======================================================================
+FROM THIS TO 
+=================================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>==================
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+ onSearchAllAuditTrail() {
+    console.log(this.selectedAllID);
+    if (this.selectedAllID.length == 0) {
+      this.dialog.open(MessageDialogComponent, {
+        data: {
+          message: 'Please select any row',
+          heading: 'Error Information',
+        },
+      });
+    } else {
+      this.isLoading = true;
+
+      // this.vendorListService
+      //   .onAllRoleAuditTrail(
+      //     this.selectedAllID.uc0001      //
+      //   )
+      //   .subscribe((data: any) => {
+      let UC0001 = this.selectedAllID.uc0001;
+      let params = { UC0001 };
+      this.apiService
+        .sendRequest(apiEndPoints.vendorListAllAuditTrail, 'GET', params)
+        .subscribe((data: any) => {
+          let newFormatData = this.structureResponse(data.data);
+          this.isLoading = false;
+        });
+    }
+  }
+  formatedData: any;
+  structureResponse(apiResponse: any) {
+    const rows = apiResponse.map((item) => {
+      return {
+        fields: [
+          { labelName: 'Version', value: item.version },
+          {
+            labelName: 'Status',
+            value: this.onChangeStatus(item.status),
+          },
+          { labelName: 'Organization Unit Code', value: item.uc0001 },
+          { labelName: 'Organization Unit Name', value: item.ff0003 },
+          { labelName: 'Organization Code', value: item.ff0002 },
+          { labelName: 'Organization Name', value: item.ff0001 },
+          { labelName: 'Street-1', value: item.ff0004 },
+          { labelName: 'Street-2', value: item.ff0005 },
+          { labelName: 'City', value: item.ff0006 },
+          { labelName: 'State', value: item.ff0007 },
+          { labelName: 'Pincode', value: item.ff0008 },              ============>home.ts
+          { labelName: 'Mobile No.', value: item.ff0009 },
+          { labelName: 'Email Id', value: item.ff0010 },
+          { labelName: 'PAN No.', value: item.ff0011 },
+          { labelName: 'GST No.', value: item.ff0012 },
+          { labelName: 'State Code', value: item.ff0013 },
+          { labelName: 'Account No.', value: item.ff0014 },
+          { labelName: 'IFSC Code', value: item.ff0015 },
+          { labelName: 'DL No.', value: item.ff0016 },
+          { labelName: 'Category', value: item.uc0002 },
+          { labelName: 'Createdon', value: item.createdon },
+          { labelName: 'Createdby', value: item.createdby },
+          { labelName: 'Comments', value: item.comments },
+        ],
+      };
+    });
+    const dialogRef = this.dialog.open(CommonAllAuditTrailComponent, {
+      minWidth: '80%',
+      data: { tableData: rows, pageTitle: 'Vendor List' },
+    });
+    dialogRef.afterClosed().subscribe((result) => {});
+  }
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+<div class="row gx-0 create-update-dialog-header-section">
+    <div class="col-10 d-flex justify-content-start">
+      <h1 class="daialog-title-name p-2">
+        {{ userData.pageTitle }}
+      </h1>
+    </div>
+    <div class="col-2 d-flex justify-content-end">
+      <button mat-icon-button (click)="onDownloadPDF()">
+        <mat-icon class="close-icon" color="warn">download</mat-icon>
+      </button>
+      <button mat-icon-button class="close-button" [mat-dialog-close]="true">
+        <mat-icon class="close-icon" color="warn">close</mat-icon>
+      </button>
+    </div>
+  </div>
+  
+  <div class="p-2">
+    <div id="header">
+      <div class="sup-head1">
+        <div class="logo2">
+          <span class="float-left">
+          </span>
+          <span class="float-right">
+            <img src="../../../assets/logo1.png" />
+          </span>
+        </div>
+      </div>
+      </div>
+      </div>
+    
+
+<div>
+    <div class="tabOverFlowY" id="htmlData" *ngIf="fields">
+      <div *ngFor="let row of fields; let rowIndex = index" [attr.id]="'Location' + (rowIndex + 1)">
+        <div class="dialog-header-section">
+          <div class="table-box">
+            <div class="section_header">
+              <div class="float-left">
+                <p class="section_header_title">{{ userData.pageTitle }} - {{ rowIndex + 1 }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+  
+        <div class="container custom-margin">
+          <div class="row">
+            <ng-container *ngFor="let field of row.fields; let i = index" >
+              <div *ngIf="i % 2 === 0" class="row">
+                <div class="col-6">
+                  <div class="field-container">
+                    <div class="field-label">{{ field.labelName }}</div>
+                    <div class="field-value">{{ field.value }}</div>
+                  </div>
+                </div>
+                <ng-container *ngIf="row.fields[i + 1]">
+                  <div class="col-6">
+                    <div class="field-container">
+                      <div class="field-label">{{ row.fields[i + 1].labelName }}</div>
+                      <div class="field-value">{{ row.fields[i + 1].value }}</div>
+                    </div>
+                  </div>
+                </ng-container>
+              </div>
+            </ng-container>
+          </div>
+          </div>
+      </div>
+    </div>
+  </div>
+  
+========================================================================================================
+.dialog-header-section{
+    padding-right: 0.5rem !important;
+}
+.field-container {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+  }
+  
+  .field-label, .field-value {
+    flex: 1; /* Make both label and value take up equal space */
+  }
+  
+  .field-label {
+    text-align: left; /* Align label text to the left */
+    font-weight: 700;
+  }
+  
+  .field-value {
+    text-align: left; /* Align value text to the right */
+  }
+  /* Style for odd and even rows */
+.row:nth-of-type(even) {
+    background-color: #f8f9fa; /* Light background for even rows */
+  }
+  
+  .row:nth-of-type(odd) {
+    background-color: #d4e3f3; /* Slightly darker background for odd rows */
+  }
+  .hidden {
+    display: none; /* Hides the element from the UI */
+  }
+  .custom-margin {
+    margin-left: 1.5rem;
+    margin-right: 1.5rem;
+  }
+================================================================================================
+import { Component,AfterViewInit,ViewChild,OnInit,ViewEncapsulation,ElementRef,Inject } from '@angular/core';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
+import { downloadCanvasArea } from 'bk-export';
+import { MatDialog, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { MessageDialogComponent } from 'src/app/common/message-dialog/message-dialog.component';
+import { changeStatusByCode } from 'src/app/common/removeEmptyStrings';
+import { AdminService } from 'src/app/rqp-admin-module/admin-data/admin.service';
+import { MessageService } from 'src/app/service/message.service';
+import {
+  openPDFByFive,
+  openPDFByTwo,
+  openPDFByFour,
+  openPDFByThree,
+} from 'rqp-audit-trail';
+export interface userData {
+  userData: any;
+  pageTitle:any;
+  tableData:any;
+}
+
+@Component({
+  selector: 'app-common-all-audit-trail',
+  templateUrl: './common-all-audit-trail.component.html',
+  styleUrls: ['./common-all-audit-trail.component.scss']
+})
+export class CommonAllAuditTrailComponent {
+  @ViewChild('htmlData') htmlData!: ElementRef;
+  fields:any;
+  isLoading=false
+  constructor(public adminService:AdminService,
+    public dialog: MatDialog,
+    public messageService:MessageService,
+    public dialogRef: MatDialogRef<CommonAllAuditTrailComponent>,
+    @Inject(MAT_DIALOG_DATA) public userData: userData
+    ) {}
+
+    ngOnInit() {
+      this.fields = this.userData.tableData
+      console.log(this.fields)
+    }
+    fileWidth: any;
+    fileHeight: any;
+    fileWidth1: any;
+    fileHeight1: any;
+    FileURLObject = {
+      url1: '',
+      url2: '',
+      url3: '',
+      url4: '',
+    };
+  openPDF() {
+    // Logic to open PDF
+    let DATA: any = document.getElementById('htmlData');
+    downloadCanvasArea(DATA,'roleAuditTrail')
+  }
+  onDownloadPDF() {
+    this.messageService.sendSnackbar(
+      'success',
+      'File will get downloaded once its ready'
+    );
+    if (this.fields.length == 1) {
+      this.openPDFByOne();
+    } else if (this.fields.length == 2) {
+      // this.openPDFByTwo();
+      let DATA: any = document.getElementById('Location1');
+      let DATA1: any = document.getElementById('Location2');
+      let HEADER: any = document.getElementById('header');
+      openPDFByTwo(HEADER, DATA, DATA1, 50, 22, 'business-unit');
+    } else if (this.fields.length == 3) {
+      let DATA: any = document.getElementById('Location1');
+      let DATA1: any = document.getElementById('Location2');
+      let DATA2: any = document.getElementById('Location3');
+      let HEADER: any = document.getElementById('header');
+      openPDFByThree(HEADER, DATA, DATA1, DATA2, 50, 22, 'business-unit');
+    } else if (this.fields.length == 4) {
+      let DATA: any = document.getElementById('Location1');
+      let DATA1: any = document.getElementById('Location2');
+      let DATA2: any = document.getElementById('Location3');
+      let DATA3: any = document.getElementById('Location4');
+      let HEADER: any = document.getElementById('header');
+      openPDFByFour(HEADER, DATA, DATA1, DATA2, DATA3, 50, 22, 'business-unit');
+    } else {
+      let DATA: any = document.getElementById('Location1');
+      let DATA1: any = document.getElementById('Location2');
+      let DATA2: any = document.getElementById('Location3');
+      let DATA3: any = document.getElementById('Location4');
+      let DATA4: any = document.getElementById('Location5');
+      let HEADER: any = document.getElementById('header');
+      openPDFByFive(
+        HEADER,
+        DATA,
+        DATA1,
+        DATA2,
+        DATA3,
+        DATA4,
+        50,
+        22,
+        'business-unit'
+      );
+    }
+  }
+  public openPDFByOne(): void {
+    let DATA: any = document.getElementById('htmlData');
+    console.log(DATA);
+    downloadCanvasArea(DATA, 'roleAuditTrail');
+  }
+
+  DATA: any;
+  DOWNLOADLINK: any;
+  onChangeStatus(data: any) {
+    return changeStatusByCode(data);
+  }
+}
+---------------------------------------------------------------------------------------------------
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+---------------------------------------------------------------------------------------------------
+FOR ACTIVE
+============
+<div class="row no-gutters">
+  <div class="col-8 d-flex justify-content-start">
+    <h1 class="customeHeading padding-left_10">Pack</h1>
+  </div>
+  <div class="col-4 d-flex justify-content-end">
+    <button mat-icon-button (click)="openPDF()">
+      <mat-icon class="close-icon" color="primary">download</mat-icon>
+    </button>
+    <button mat-icon-button [mat-dialog-close]="true">
+      <mat-icon class="close-icon" color="warn">close</mat-icon>
+    </button>
+  </div>
+  <!-- <div class="col-2 d-flex justify-content-end">
+        
+    </div> -->
+</div>
+<div
+  class="table-box, tabOverFlowY paddding_25 bg_edf0f8"
+  id="htmlData"
+  *ngIf="this.data"
+>
+  <div class="margin-top_10">
+    <div class="sup-head1 margin-top_10">
+      <div class="logo2">
+        <span class="float-left font-size_18 font-family_auto">
+          <h2 class="font-weight_800 color_blue">Pack</h2>
+        </span>
+        <span class="float-right">
+          <img src="../../../assets/logo1.png" />
+        </span>
+      </div>
+    </div>
+    <!-- <div class="headers">Business Unit Information</div> -->
+    <div>
+      <div>
+        <div class="headers margin_4">
+          <p class="color_aliceblue font-size_12 margin-top_2">Pack</p>
+        </div>
+        <mat-spinner
+          *ngIf="isLoading"
+          class="global-loading-spinner"
+          color="primary"
+          mode="indeterminate"
+        ></mat-spinner>
+        <div class="supplier-content">
+          <div class="sup-head">
+            <div class="sup-fields">Version</div>
+            <div class="sup-values">{{ data.version }}</div>
+          </div>
+          <div class="sup-head">
+            <div class="sup-fields">Status</div>
+            <div class="sup-values">{{ onChangeStatus(data.status) }}</div>
+          </div>
+          <div class="sup-head bg-color_bcceea">
+            <div class="sup-fields">Pack Code</div>
+            <div class="sup-values">{{ data.uc0001 }}</div>
+          </div>
+
+          <div class="sup-head bg-color_bcceea">
+            <div class="sup-fields">Pack Name</div>
+            <div class="sup-values">{{ data.ff0001 }}</div>
+          </div>
+          <div class="sup-head">
+            <div class="sup-fields">Createdon</div>
+            <div class="sup-values">{{ data.createdon }}</div>
+          </div>
+          <div class="sup-head">
+            <div class="sup-fields">Createdby</div>
+            <div class="sup-values">{{ data.createdby }}</div>
+          </div>
+        </div>
+        <div class="supplier-content-comments">
+          <div class="sup-head-comments bg-color_bcceea">
+            <div class="sup-fields-comments">Comments :-</div>
+            <div class="sup-values-comments">{{ data.comments }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+==================================================================================
+import { Component,AfterViewInit,ViewChild,OnInit,ViewEncapsulation,ElementRef,Inject } from '@angular/core';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
+import { MAT_DIALOG_DATA, MatDialogRef} from '@angular/material/dialog';
+import { PackMasterService } from '../pack-master.service';
+import { downloadCanvasArea } from 'bk-export';
+import { changeStatusByCode } from 'src/app/common/removeEmptyStrings';
+import { AdminService } from 'src/app/rqp-admin-module/admin-data/admin.service';
+export interface userData {
+  userData: any;
+  type:any;
+  tableData:any;
+}
+
+@Component({
+  selector: 'app-active-pack-master-audit-trail',
+  templateUrl: './active-pack-master-audit-trail.component.html',
+  styleUrls: ['./active-pack-master-audit-trail.component.scss']
+})
+export class ActivePackMasterAuditTrailComponent  implements OnInit{
+  @ViewChild('htmlData') htmlData!: ElementRef;
+  isLoading=false
+  constructor(public adminService:AdminService,
+    private packMasterService: PackMasterService,
+    public dialogRef: MatDialogRef<ActivePackMasterAuditTrailComponent>,
+    @Inject(MAT_DIALOG_DATA) public userData: userData
+    ) {}
+
+    data:any;
+  ngOnInit() {
+    console.log(this.userData.tableData.uc0001)
+    console.log(this.userData.type)
+    this.onSearch()
+  }
+  onSearch(){
+    this.isLoading=true;
+    this.packMasterService.onLoadUpdatePage(this.userData.tableData.uc0001).subscribe((data: any) => {
+      console.log(data);
+      this.data=data.data;
+      this.isLoading=false;
+    })
+  }
+  
+  
+  public openPDF(): void {
+    let DATA: any = document.getElementById('htmlData');
+    downloadCanvasArea(DATA,'pack')
+  }
+  onChangeStatus(data:any){
+    return changeStatusByCode(data);
+     }
+}
+=================================================================================
+ onActiveSelectAuditRow() {
+    if (this.selectedRow.length == 0) {
+      this.dialog.open(MessageDialogComponent, {
+        data: {
+          message: 'Please select any row',
+          heading: 'Error Information',
+        },
+      });
+    } else {
+      const dialogRef = this.dialog.open(ActivePackMasterAuditTrailComponent, { ==========>>>>home.ts
+        minWidth: '80%',
+        data: { tableData: this.selectedRow, type: 'Update' },
+      });
+      dialogRef.afterClosed().subscribe((result) => {});
+    }
+  }
+===============================================
+  <button
+              mat-raised-button
+              class="submitButton"
+              (click)="onActiveSelectAuditRow()"  ===========>home.html
+            >
+              Audit Trail
+            </button>
+                    (OR)
+ <button
+                mat-raised-button
+                color="primary"
+                class="bg-color_295ea3 font-size_smaller height_25 margin_5"
+                (click)="onActiveSelectAuditRow()"
+              >
+                Audit Trail
+              </button>
+
+
+===================================================================================
+FROM THIS TO 
+============
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+onActiveSelectAuditRow() {
+    let tableData = [
+      { labelName: 'Version', value: this.selectedRow.version },
+      {
+        labelName: 'Status',
+        value: this.onChangeStatus(this.selectedRow.status),
+      },
+      { labelName: 'UOM Code', value: this.selectedRow.uc0001 },
+      { labelName: 'UOM Name', value: this.selectedRow.ff0001 },
+      { labelName: 'Business Unit Code', value: this.selectedRow.ff0002 },
+      { labelName: 'Category', value: this.selectedRow.uc0002 },
+      { labelName: 'Createdon', value: this.selectedRow.createdon },
+      { labelName: 'Createdby', value: this.selectedRow.createdby },
+      { labelName: 'Comments', value: this.selectedRow.comments },
+    ];
+    if (this.selectedRow.length == 0) {                                       ======>home.ts
+      this.dialog.open(MessageDialogComponent, {
+        data: {
+          message: 'Please select any row',
+          heading: 'Error Information',
+        },
+      });
+    } else {
+      const dialogRef = this.dialog.open(CommonActiveAuditTrailComponent, {
+        minWidth: '80%',
+        data: { tableData: tableData, pageTitle: 'Unit Master' },
+      });
+      dialogRef.afterClosed().subscribe((result) => {});
+    }
+  }
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+=================================>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>==================
+<div class="row gx-0 create-update-dialog-header-section">
+    <div class="col-10 d-flex justify-content-start">
+      <h1 class="daialog-title-name p-2">
+        {{ this.userData.pageTitle }}
+      </h1>
+    </div>
+    <div class="col-2 d-flex justify-content-end">
+      <button mat-icon-button (click)="openPDF()">
+        <mat-icon class="close-icon" color="warn">download</mat-icon>
+      </button>
+      <button mat-icon-button class="close-button" [mat-dialog-close]="true">
+        <mat-icon class="close-icon" color="warn">close</mat-icon>
+      </button>
+    </div>
+  </div>
+  
+  
+  <div class="p-2">
+  <div class="tabOverFlowY" id="htmlData" *ngIf="fields">
+
+    <div class="sup-head1" >
+        <div class="logo2">
+          <span class="float-left ">
+            <!-- <h2 class="section_header_title">{{ this.userData.pageTitle }}</h2> -->
+          </span>
+          <span class="float-right">
+            <img src="../../../assets/logo1.png" />
+          </span>
+        </div>
+      </div>
+      <div class="dialog-header-section">
+        <div class="table-box">
+          <div class="section_header">
+            <div class="float-left">
+              <p class="section_header_title">{{ this.userData.pageTitle }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    <div class="container">
+      <div class="row">
+        <!-- Loop through fields and create rows of two pairs each -->
+        <ng-container *ngFor="let field of fields; let i = index" [attr.id]="'Location' + i">
+          <!-- Check if index is even to start a new row -->
+          <div *ngIf="i % 2 === 0" class="row">
+            <!-- Display label and value pairs -->
+            <div class="col-6">
+              <div class="field-container">
+                <div class="field-label">{{ field.labelName }}</div>
+                <div class="field-value">{{ field.value }}</div>
+              </div>
+            </div>
+            <!-- Check if next item exists and is in bounds to display in the next col-6 -->
+            <ng-container *ngIf="fields[i + 1]">
+              <div class="col-6">
+                <div class="field-container">
+                  <div class="field-label">{{ fields[i + 1].labelName }}</div>
+                  <div class="field-value">{{ fields[i + 1].value }}</div>
+                </div>
+              </div>
+            </ng-container>
+          </div>
+        </ng-container>
+      </div>
+    </div>
+  </div>
+</div>
+  ============================================================================================================================
+.dialog-header-section{
+    padding-right: 0.5rem !important;
+}
+.field-container {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+  }
+  
+  .field-label, .field-value {
+    flex: 1; /* Make both label and value take up equal space */
+  }
+  
+  .field-label {
+    text-align: left; /* Align label text to the left */
+    font-weight: 700;
+  }
+  
+  .field-value {
+    text-align: left; /* Align value text to the right */
+  }
+  /* Style for odd and even rows */
+.row:nth-of-type(even) {
+    background-color: #f8f9fa; /* Light background for even rows */
+  }
+  
+  .row:nth-of-type(odd) {
+    background-color: #d4e3f3; /* Slightly darker background for odd rows */
+  }
+  .hidden {
+    display: none; /* Hides the element from the UI */
+  }
+  
+==================================================================================================================================
+import { Component,AfterViewInit,ViewChild,OnInit,ViewEncapsulation,ElementRef,Inject } from '@angular/core';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
+import { downloadCanvasArea } from 'bk-export';
+import { MatDialog, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { MessageDialogComponent } from 'src/app/common/message-dialog/message-dialog.component';
+import { changeStatusByCode } from 'src/app/common/removeEmptyStrings';
+import { AdminService } from 'src/app/rqp-admin-module/admin-data/admin.service';
+import { MessageService } from 'src/app/service/message.service';
+
+export interface userData {
+  userData: any;
+  pageTitle:any;
+  tableData:any;
+}
+@Component({
+  selector: 'app-common-active-audit-trail',
+  templateUrl: './common-active-audit-trail.component.html',
+  styleUrls: ['./common-active-audit-trail.component.scss']
+})
+export class CommonActiveAuditTrailComponent {
+  @ViewChild('htmlData') htmlData!: ElementRef;
+  fields:any;
+  isLoading=false
+  constructor(public adminService:AdminService,
+    public dialog: MatDialog,
+    public messageService:MessageService,
+    public dialogRef: MatDialogRef<CommonActiveAuditTrailComponent>,
+    @Inject(MAT_DIALOG_DATA) public userData: userData
+    ) {}
+
+    ngOnInit() {
+      this.fields = this.userData.tableData
+      console.log(this.fields)
+    }
+  openPDF() {
+    // Logic to open PDF
+    let DATA: any = document.getElementById('htmlData');
+    downloadCanvasArea(DATA,'roleAuditTrail')
+  }
+}
+===================================================================================
+  onAllSelectAuditTrailRow() {
+    if (this.selectedAllID.length == 0) {
+      this.dialog.open(MessageDialogComponent, {
+        data: {
+          message: 'Please select any row',
+          heading: 'Error Information',
+        },
+      });
+    } else {
+      const dialogRef = this.dialog.open(AllVendorListAuditTrailComponent, {  ==========>>>>home.ts
+        minWidth: '80%',
+        data: { tableData: this.selectedAllID, type: 'Update' },
+      });
+      dialogRef.afterClosed().subscribe((result) => {});
+    }
+  }
+===============================================
+  <button
+              mat-raised-button
+              class="submitButton"
+              (click)="onActiveSelectAuditTrailRow()"  ===========>home.html
+            >
+              Audit Trail
+            </button>
+===================================================================================
+
+IF YOU WANT TO PASS 2 DIFFERENT VALUES IN SINGLE API FOR SAME COMPONENT IN 2 DIFFERENT PLACES
+
+API==>
+-------------
+public masterDocuments() {
+    ///dms/Documents-for-print
+    return this.http.get(
+      `${this.API_URL}dms/Documents-for-print?ff0002=SP1&ff0004=URS`
+    );
+  }
+
+
+.TS
+-------------
+ ngOnInit(): void {
+    this.filterObject = {
+      field: 'SELECT',
+      value: '',
+      condition: 'SELECT',
+    };
+    console.log('params');
+    this.router.queryParams.subscribe((params: any) => {      
+      console.log(params);
+      this.ff0001=params.ff0001
+      
+  })
+   let  ff0002='SP1';
+   let  ff0004=this.ff0001;
+   const params={ff0002,ff0004};
+this.apiService.sendRequest(apiEndPoints.masterDocumet,'GET',params).subscribe((data: any) => {
+    // this.dmsService.masterDocuments().subscribe((data: any) => {
+      //this.tableData.data = data.data;
+      this.tableData = new MatTableDataSource(data.data);
+      this.tableData.paginator = this.paginator;
+      this.tableData.sort = this.sort;
+    });
+  }
+
+1ST
+-----------
+ public masterDocuments(){
+    let ff0001 = {ff0001:'URS'}
+    
+  this.router.navigate(['./dms/master-documents'],{queryParams:ff0001})
+  }
+2ND
+--------------
+ public masterDocuments(){
+    let ff0001 = {ff0001:'SOP'}
+    this.router.navigate(['./dms/master-documents'],{queryParams:ff0001})
+  }
+==================================================================================================
+103.10.234.106
+
+VM25258\Admin1
+Welcome@123
+
+VM25258\Admin2
+Welcome@456
+======================
+103.138.189.150
+
+VM25258\Admin3
+Welcome@123
+
+VM25258\Admin4
+Welcome@456
+
+=====================
+88.135.73.1
+
+VM25258\Admin5
+Welcome@Five
+
+VM25258\Admin6
+Welcome@Six
+
+-----------------------
+================================================
+ TASK1: IF YOU WANT TO ADD POPUP DROPDOWN FOR ANYTHING
+ """"" ''''''''''''''''''''''''''''''''''''''''''''''
+
+
+asg-create-update.component.html
+------------------------------
+
+ <mat-form-field appearance="outline" class="col-6 px-1">
+                  <mat-label>Account Group No</mat-label>
+                  <input
+                    type="text"
+                    matInput
+                    formControlName="ff0002"
+                    placeholder="Account Group No"
+                    (change)="onChangeAccountGroupNo()"
+                  />
+                  <img
+                    alt="lov img"
+                    src="../../../../../../assets/searchfind.svg"
+                    class="icon-size lovSearchButton"
+                    color="primary"
+                    (click)="openAccountGroupNoLOV()"
+                  />
+</mat-form-field>
+================================================================================
+asg-create-update.component.ts
+------------------------------
+
+  openAccountGroupNoLOV() {
+    this.displayedColumns = [
+      { field: 'agCode', title: 'Code' },
+      { field: 'agName', title: 'Description' },
+    ];
+    const dialogRef = this.dialog.open(LovDialogComponent, {
+      height: '500px',
+      width: '600px',
+      data: {
+        dialogTitle: 'Account Group No',
+        dialogColumns: this.displayedColumns,
+        dialogData: this.agMasterList,
+        lovName: 'businessUnitList',
+      },
+      disableClose: true,
+    });
+    dialogRef.afterClosed().subscribe((result) => {
+      if (result) {
+        this.selectedDialogData = result.data;
+        this.DepartmentMaster.controls['ff0002'].setValue(
+          this.selectedDialogData.agName
+        );
+      }
+    });
+  }
+
+  onChangeAccountGroupNo() {
+    if (this.DepartmentMaster.controls['ff0002'].value == '') {
+      this.DepartmentMaster.controls['ff0002'].setValue('');
+    } else {
+      this.isStatusSuccess = false;
+      let statusCurrentValue = this.DepartmentMaster.controls['ff0002'].value;
+      this.agMasterList.forEach((elements) => {
+        if (elements.agCode == statusCurrentValue) {
+          this.isStatusSuccess = true;
+        }
+      });
+      if (this.isStatusSuccess == false) {
+        this.DepartmentMaster.controls['ff0002'].setErrors({ incorrect: true });
+        this.openAccountGroupNoLOV();
+      }
+    }
+  }
+==================================================================================
+asg-create-update.component.ts
+------------------------------
+
+ ngOnInit(): void {
+    this.DepartmentMaster.controls['ff0001'].patchValue(
+      this.cookieService.get('buCode')
+    );
+    this.onLoadStatusDropDown();
+    // this.onloadDropDown();
+================================
+    this.onLoadFiDropdown();
+================================
+    console.log(this.userData.type);
+    if (this.userData.type == 'Update') {
+      this.isReadOnly = true;
+      this.isUpdate = true;
+      console.log(this.userData.type);
+      this.onLoadFormValue();
+    } else {
+      this.DepartmentMaster.controls['uc0001'].setValue('');
+      this.isReadOnly = false;
+      this.isUpdate = false;
+    }
+  }
+
+ agMasterList: any;
+  onLoadFiDropdown() {
+    this.isLoading = true;
+    this.businessUnitService.getFiDropDownList().subscribe((data: any) => {
+      this.orgList = data.data.orgList;
+      this.agMasterList = data.data.agMasterList;
+      this.unitList = data.data.unitList;
+      this.isLoading = false;
+    });
+  }
+====================================================================================
+business-unit.service.ts
+-----------------------
+
+export class BusinessUnitService {
+  // private API_URL='http://103.10.234.106:8081/';
+  private API_URL = environment.apiBaseURL;
+  constructor(private http: HttpClient, private cookieService: CookieService) {}
+
+getFiDropDownList() {
+    let token = this.cookieService.get('token');
+    let listURL =
+      this.API_URL +
+      `fi/input?businessunit=${this.cookieService.get('buCode')}`;
+    const httpOptions = {
+      headers: new HttpHeaders({
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + token,
+      }),
+    };
+    return this.http.get(listURL, httpOptions);
+  }
+
+}
+========================================================================================
+ TASK1: IF YOU WANT TO ADD POPUP DROPDOWN FOR ANYTHING
+ """"" ''''''''''''''''''''''''''''''''''''''''''''''
+
+
+asg-create-update.component.html
+------------------------------
+
+ <mat-form-field appearance="outline" class="col-6 px-1">
+                  <mat-label>Account Group No</mat-label>
+                  <input
+                    type="text"
+                    matInput
+                    formControlName="ff0002"
+                    placeholder="Account Group No"
+                    (change)="onChangeAccountGroupNo()"
+                  />
+                  <img
+                    alt="lov img"
+                    src="../../../../../../assets/searchfind.svg"
+                    class="icon-size lovSearchButton"
+                    color="primary"
+                    (click)="openAccountGroupNoLOV()"
+                  />
+</mat-form-field>
+================================================================================
+asg-create-update.component.ts
+------------------------------
+
+  openAccountGroupNoLOV() {
+    this.displayedColumns = [
+      { field: 'agCode', title: 'Code' },
+      { field: 'agName', title: 'Description' },
+    ];
+    const dialogRef = this.dialog.open(LovDialogComponent, {
+      height: '500px',
+      width: '600px',
+      data: {
+        dialogTitle: 'Account Group No',
+        dialogColumns: this.displayedColumns,
+        dialogData: this.agMasterList,
+        lovName: 'businessUnitList',
+      },
+      disableClose: true,
+    });
+    dialogRef.afterClosed().subscribe((result) => {
+      if (result) {
+        this.selectedDialogData = result.data;
+        this.DepartmentMaster.controls['ff0002'].setValue(
+          this.selectedDialogData.agName
+        );
+      }
+    });
+  }
+
+  onChangeAccountGroupNo() {
+    if (this.DepartmentMaster.controls['ff0002'].value == '') {
+      this.DepartmentMaster.controls['ff0002'].setValue('');
+    } else {
+      this.isStatusSuccess = false;
+      let statusCurrentValue = this.DepartmentMaster.controls['ff0002'].value;
+      this.agMasterList.forEach((elements) => {
+        if (elements.agCode == statusCurrentValue) {
+          this.isStatusSuccess = true;
+        }
+      });
+      if (this.isStatusSuccess == false) {
+        this.DepartmentMaster.controls['ff0002'].setErrors({ incorrect: true });
+        this.openAccountGroupNoLOV();
+      }
+    }
+  }
+==================================================================================
+asg-create-update.component.ts
+------------------------------
+
+ ngOnInit(): void {
+    this.DepartmentMaster.controls['ff0001'].patchValue(
+      this.cookieService.get('buCode')
+    );
+    this.onLoadStatusDropDown();
+    // this.onloadDropDown();
+================================
+    this.onLoadFiDropdown();
+================================
+    console.log(this.userData.type);
+    if (this.userData.type == 'Update') {
+      this.isReadOnly = true;
+      this.isUpdate = true;
+      console.log(this.userData.type);
+      this.onLoadFormValue();
+    } else {
+      this.DepartmentMaster.controls['uc0001'].setValue('');
+      this.isReadOnly = false;
+      this.isUpdate = false;
+    }
+  }
+
+ agMasterList: any;
+  onLoadFiDropdown() {
+    this.isLoading = true;
+    this.businessUnitService.getFiDropDownList().subscribe((data: any) => {
+      this.orgList = data.data.orgList;
+      this.agMasterList = data.data.agMasterList;
+      this.unitList = data.data.unitList;
+      this.isLoading = false;
+    });
+  }
+====================================================================================
+business-unit.service.ts
+-----------------------
+
+export class BusinessUnitService {
+  // private API_URL='http://103.10.234.106:8081/';
+  private API_URL = environment.apiBaseURL;
+  constructor(private http: HttpClient, private cookieService: CookieService) {}
+
+getFiDropDownList() {
+    let token = this.cookieService.get('token');
+    let listURL =
+      this.API_URL +
+      `fi/input?businessunit=${this.cookieService.get('buCode')}`;
+    const httpOptions = {
+      headers: new HttpHeaders({
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + token,
+      }),
+    };
+    return this.http.get(listURL, httpOptions);
+  }
+
+}
+=====================================================================================
+ TASK1: IF YOU WANT TO ADD POPUP DROPDOWN FOR ANYTHING
+ """"" ''''''''''''''''''''''''''''''''''''''''''''''
+
+
+asg-create-update.component.html
+------------------------------
+
+ <mat-form-field appearance="outline" class="col-6 px-1">
+                  <mat-label>Account Group No</mat-label>
+                  <input
+                    type="text"
+                    matInput
+                    formControlName="ff0002"
+                    placeholder="Account Group No"
+                    (change)="onChangeAccountGroupNo()"
+                  />
+                  <img
+                    alt="lov img"
+                    src="../../../../../../assets/searchfind.svg"
+                    class="icon-size lovSearchButton"
+                    color="primary"
+                    (click)="openAccountGroupNoLOV()"
+                  />
+</mat-form-field>
+================================================================================
+asg-create-update.component.ts
+------------------------------
+
+  openAccountGroupNoLOV() {
+    this.displayedColumns = [
+      { field: 'agCode', title: 'Code' },
+      { field: 'agName', title: 'Description' },
+    ];
+    const dialogRef = this.dialog.open(LovDialogComponent, {
+      height: '500px',
+      width: '600px',
+      data: {
+        dialogTitle: 'Account Group No',
+        dialogColumns: this.displayedColumns,
+        dialogData: this.agMasterList,
+        lovName: 'businessUnitList',
+      },
+      disableClose: true,
+    });
+    dialogRef.afterClosed().subscribe((result) => {
+      if (result) {
+        this.selectedDialogData = result.data;
+        this.DepartmentMaster.controls['ff0002'].setValue(
+          this.selectedDialogData.agName
+        );
+      }
+    });
+  }
+
+  onChangeAccountGroupNo() {
+    if (this.DepartmentMaster.controls['ff0002'].value == '') {
+      this.DepartmentMaster.controls['ff0002'].setValue('');
+    } else {
+      this.isStatusSuccess = false;
+      let statusCurrentValue = this.DepartmentMaster.controls['ff0002'].value;
+      this.agMasterList.forEach((elements) => {
+        if (elements.agCode == statusCurrentValue) {
+          this.isStatusSuccess = true;
+        }
+      });
+      if (this.isStatusSuccess == false) {
+        this.DepartmentMaster.controls['ff0002'].setErrors({ incorrect: true });
+        this.openAccountGroupNoLOV();
+      }
+    }
+  }
+==================================================================================
+asg-create-update.component.ts
+------------------------------
+
+ ngOnInit(): void {
+    this.DepartmentMaster.controls['ff0001'].patchValue(
+      this.cookieService.get('buCode')
+    );
+    this.onLoadStatusDropDown();
+    // this.onloadDropDown();
+================================
+    this.onLoadFiDropdown();
+================================
+    console.log(this.userData.type);
+    if (this.userData.type == 'Update') {
+      this.isReadOnly = true;
+      this.isUpdate = true;
+      console.log(this.userData.type);
+      this.onLoadFormValue();
+    } else {
+      this.DepartmentMaster.controls['uc0001'].setValue('');
+      this.isReadOnly = false;
+      this.isUpdate = false;
+    }
+  }
+
+ agMasterList: any;
+  onLoadFiDropdown() {
+    this.isLoading = true;
+    this.businessUnitService.getFiDropDownList().subscribe((data: any) => {
+      this.orgList = data.data.orgList;
+      this.agMasterList = data.data.agMasterList;
+      this.unitList = data.data.unitList;
+      this.isLoading = false;
+    });
+  }
+====================================================================================
+business-unit.service.ts
+-----------------------
+
+export class BusinessUnitService {
+  // private API_URL='http://103.10.234.106:8081/';
+  private API_URL = environment.apiBaseURL;
+  constructor(private http: HttpClient, private cookieService: CookieService) {}
+
+getFiDropDownList() {
+    let token = this.cookieService.get('token');
+    let listURL =
+      this.API_URL +
+      `fi/input?businessunit=${this.cookieService.get('buCode')}`;
+    const httpOptions = {
+      headers: new HttpHeaders({
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + token,
+      }),
+    };
+    return this.http.get(listURL, httpOptions);
+  }
+
+}
+============================================================================
+================================================================================
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements.  See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+================================================================================
+
+
+                     Apache Tomcat Version 10.1.8
+                            Release Notes
+
+
+=========
+CONTENTS:
+=========
+
+* Dependency Changes
+* API Stability
+* Bundled APIs
+* Web application reloading and static fields in shared libraries
+* Security manager URLs
+* Symlinking static resources
+* Viewing the Tomcat Change Log
+* Cryptographic software notice
+* When all else fails
+
+
+===================
+Dependency Changes:
+===================
+Tomcat 10.1 is designed to run on Java 11 and later.
+
+
+==============
+API Stability:
+==============
+
+The public interfaces for the following classes are fixed and will not be
+changed at all during the remaining lifetime of the 10.x series:
+- All classes in the jakarta namespace
+
+The public interfaces for the following classes may be added to in order to
+resolve bugs and/or add new features. No existing interface method will be
+removed or changed although it may be deprecated.
+- org.apache.catalina.* (excluding sub-packages)
+
+Note: As Tomcat 10 matures, the above list will be added to. The list is not
+      considered complete at this time.
+
+The remaining classes are considered part of the Tomcat internals and may change
+without notice between point releases.
+
+
+=============
+Bundled APIs:
+=============
+A standard installation of Tomcat 10.1 makes all of the following APIs available
+for use by web applications (by placing them in "lib"):
+* annotations-api.jar (Annotations package)
+* catalina.jar (Tomcat Catalina implementation)
+* catalina-ant.jar (Tomcat Catalina Ant tasks)
+* catalina-ha.jar (High availability package)
+* catalina-ssi.jar (Server-side Includes module)
+* catalina-storeconfig.jar (Generation of XML configuration from current state)
+* catalina-tribes.jar (Group communication)
+* ecj-4.27.jar (Eclipse JDT Java compiler)
+* el-api.jar (EL 5.0 API)
+* jasper.jar (Jasper 2 Compiler and Runtime)
+* jasper-el.jar (Jasper 2 EL implementation)
+* jsp-api.jar (JSP 3.1 API)
+* servlet-api.jar (Servlet 6.0 API)
+* tomcat-api.jar (Interfaces shared by Catalina and Jasper)
+* tomcat-coyote.jar (Tomcat connectors and utility classes)
+* tomcat-dbcp.jar (package renamed database connection pool based on Commons DBCP 2)
+* tomcat-jdbc.jar (Tomcat's database connection pooling solution)
+* tomcat-jni.jar (Interface to the native component of the APR/native connector)
+* tomcat-util.jar (Various utilities)
+* tomcat-websocket.jar (WebSocket 2.1 implementation)
+* websocket-api.jar (WebSocket 2.1 API)
+* websocket-client-api.jar (WebSocket 2.1 Client API)
+
+You can make additional APIs available to all of your web applications by
+putting unpacked classes into a "classes" directory (not created by default),
+or by placing them in JAR files in the "lib" directory.
+
+To override the XML parser implementation or interfaces, use the upgradeable
+modules feature.
+
+
+================================================================
+Web application reloading and static fields in shared libraries:
+================================================================
+Some shared libraries (many are part of the JDK) keep references to objects
+instantiated by the web application. To avoid class loading related problems
+(ClassCastExceptions, messages indicating that the classloader
+is stopped, etc.), the shared libraries state should be reinitialized.
+
+Something which might help is to avoid putting classes which would be
+referenced by a shared static field in the web application classloader,
+and putting them in the shared classloader instead (JARs should be put in the
+"lib" folder, and classes should be put in the "classes" folder).
+
+
+======================
+Security manager URLs:
+======================
+In order to grant security permissions to JARs located inside the
+web application repository, use URLs of the following format
+in your policy file:
+
+file:${catalina.base}/webapps/examples/WEB-INF/lib/driver.jar
+
+
+============================
+Symlinking static resources:
+============================
+By default, Unix symlinks will not work when used in a web application to link
+resources located outside the web application root directory.
+
+This behavior is optional, and the "allowLinking" flag may be used to deactivate
+the check.
+
+
+==============================
+Viewing the Tomcat Change Log:
+==============================
+The full change log is available from https://tomcat.apache.org and is also
+included in the documentation web application.
+
+
+=============================
+Cryptographic software notice
+=============================
+This distribution includes cryptographic software.  The country in
+which you currently reside may have restrictions on the import,
+possession, use, and/or re-export to another country, of
+encryption software.  BEFORE using any encryption software, please
+check your country's laws, regulations and policies concerning the
+import, possession, or use, and re-export of encryption software, to
+see if this is permitted.  See <http://www.wassenaar.org/> for more
+information.
+
+The U.S. Government Department of Commerce, Bureau of Industry and
+Security (BIS), has classified this software as Export Commodity
+Control Number (ECCN) 5D002.C.1, which includes information security
+software using or performing cryptographic functions with asymmetric
+algorithms.  The form and manner of this Apache Software Foundation
+distribution makes it eligible for export under the License Exception
+ENC Technology Software Unrestricted (TSU) exception (see the BIS
+Export Administration Regulations, Section 740.13) for both object
+code and source code.
+
+The following provides more details on the included cryptographic
+software:
+  - Tomcat includes code designed to work with JSSE
+  - Tomcat includes code designed to work with OpenSSL
+
+
+====================
+When all else fails:
+====================
+See the FAQ
+https://tomcat.apache.org/faq/
+=======================================================================================
+
+
+
+
+
